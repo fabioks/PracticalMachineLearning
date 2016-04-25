@@ -1,0 +1,152 @@
+---
+title: "Practical Machine Learning Course Project"
+output:
+  md_document
+---
+
+## Summary
+
+Using devices such as Jawbone Up, Nike FuelBand, and Fitbit it is now possible to collect a large amount of data about personal activity relatively inexpensively. These type of devices are part of the quantified self movement – a group of enthusiasts who take measurements about themselves regularly to improve their health, to find patterns in their behavior, or because they are tech geeks. One thing that people regularly do is quantify how much of a particular activity they do, but they rarely quantify how well they do it. In this project, the goal is to use data from accelerometers on the belt, forearm, arm, and dumbell of 6 participants and  predict the manner in which they did the exercise. They were asked to perform barbell lifts correctly and incorrectly in 5 different ways.
+
+## Loading necessary libraries
+
+```{r, message = FALSE}
+library(caret)
+library(rpart)
+library(rpart.plot)
+library(RColorBrewer)
+library(rattle)
+library(randomForest)
+library(knitr)
+library(gbm)
+library(survival)
+library(splines)
+library(parallel)
+library(plyr)
+```
+
+## Loading Data
+
+Loading the working data and the 20 test case.
+
+```{r}
+if (!file.exists("pml-training.csv")) {
+  download.file("http://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv", 
+                destfile = "pml-training.csv")
+}
+if (!file.exists("pml-testing.csv")) {
+  download.file("http://d396qusza40orc.cloudfront.net/predmachlearn/pml-testing.csv", 
+                destfile = "pml-testing.csv")
+}
+
+training <- read.csv("pml-training.csv", sep = ",", na.strings = c("NA","#DIV/0!",""))
+testing <- read.csv("pml-testing.csv", sep = ",", na.strings = c("NA","#DIV/0!",""))
+```
+
+## Cleaning and Preparing Data
+
+Splitting the training and test data
+
+```{r}
+inTrain <- createDataPartition(training$classe, p = 0.6, list = FALSE)
+mytraining <- training[inTrain, ]
+mytesting <- training[-inTrain, ]
+```
+
+Removing variables with near zero variance
+
+```{r}
+nzv <- nearZeroVar(mytraining, saveMetrics = TRUE)
+mytraining <- mytraining[, nzv$nzv == FALSE]
+
+nzv <- nearZeroVar(mytesting, saveMetrics = TRUE)
+mytesting <- mytesting[, nzv$nzv == FALSE]
+
+mytraining <- mytraining[c(-1)]
+testing <- testing[-1,]
+```
+
+Removing variables that are almost NA's.
+
+```{r}
+trainingtemp <- mytraining
+for(i in 1:length(mytraining)) {
+    if( sum( is.na( mytraining[, i] ) ) /nrow(mytraining) >= .7) {
+        for(j in 1:length(trainingtemp)) {
+            if( length( grep(names(mytraining[i]), names(trainingtemp)[j]) ) == 1)  {
+                trainingtemp <- trainingtemp[ , -j]
+            }   
+        } 
+    }
+}
+
+mytraining <- trainingtemp
+rm(trainingtemp)
+
+header1 <- colnames(mytraining)
+header2 <- colnames(mytraining[, -58])
+mytesting <- mytesting[header1]
+testing <- testing[header2]   
+```
+
+Coercing testing data into the same type.
+
+```{r}
+for (i in 1:length(testing) ) {
+    for(j in 1:length(mytraining)) {
+        if( length( grep(names(mytraining[i]), names(testing)[j]) ) == 1)  {
+            class(testing[j]) <- class(mytraining[i])
+        }      
+    }      
+}
+
+# To get the same class between testing and myTraining
+testing <- rbind(mytraining[2, -58] , testing)
+testing <- testing[-1,]
+```
+## Prediction with Decision Trees
+
+```{r}
+set.seed(74810)
+modFitA1 <- rpart(classe ~ ., data = mytraining, method = "class")
+fancyRpartPlot(modFitA1)
+
+predictionsA1 <- predict(modFitA1, mytesting, type = "class")
+cmtree <- confusionMatrix(predictionsA1, mytesting$classe)
+cmtree
+```
+
+## Prediction with Random Forests
+
+```{r}
+set.seed(74810)
+modFitB1 <- randomForest(classe ~ ., data = mytraining)
+
+predictionB1 <- predict(modFitB1, mytesting, type = "class")
+cmrf <- confusionMatrix(predictionB1, mytesting$classe)
+cmrf
+plot(modFitB1)
+```
+
+## Prediction with Generalized Boosted Regression
+
+```{r, message = FALSE}
+set.seed(74810)
+fitControl <- trainControl(method = "repeatedcv", number = 5, repeats = 1)
+
+gbmFit1 <- train(classe ~ ., data = mytraining, method = "gbm", trControl = fitControl, verbose = FALSE)
+gbmFinMod1 <- gbmFit1$finalModel
+
+gbmPredTest <- predict(gbmFit1, newdata = mytesting)
+gbmAccuracyTest <- confusionMatrix(gbmPredTest, mytesting$classe)
+gbmAccuracyTest
+```
+
+## Predicting Results on the Test Data
+
+Ramdom Forests gave an Accuracy of 99.71% so this model was used to predict the 20 cases.
+
+```{r}
+predictionB2 <- predict(modFitB1, testing, type = "class")
+predictionB2
+```
